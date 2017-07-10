@@ -1,7 +1,7 @@
 Please read the following carefully before opening a new issue.
 Your issue may be closed if it does not provide the information required by this template.
 
-We use GitHub Issues, as well as our help email at canvasdatahelp@instructure.com for tracking issues.
+We use GitHub Issues, as well as our help email at canvasdatahelp@instructure.com for tracking issues. Although it should be noted this is not officially supported by Instructure, the Canvas Data support team will ensure it is in a working state.
 
 - If you have a question about how to use the CLI; please ask your CSM, or email canvasdatahelp@instructure.com
 - If you have a feature request, that should be posted on the community site: [HERE][community_link]
