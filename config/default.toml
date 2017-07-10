@@ -1,0 +1,13 @@
+# This determines the log level
+save_location = "/tmp/cdl-save"
+rocksdb_location = "/tmp/cdl-rocksdb"
+skip_historical_imports = true
+
+[canvasdataauth]
+api_key = "FILL_ME_OUT"
+api_secret = "FILL_ME_OUT"
+
+[database]
+url = "postgres://localhost/canvas_data_loader"
+# Valid Values are Psql
+db_type = "Psql"
