@@ -99,16 +99,16 @@ impl CanvasDataApiClient {
   ///
   /// * `resp` - The Files in dump response to check.
   pub fn is_historical_refresh(&self, resp: FilesInDumpResponse) -> bool {
-    let mut has_found_non_requests_table = false;
+    let mut has_found_all_requests_table = true;
     'outer: for artifact in resp.artifacts_by_table.values() {
       for file in artifact.files.iter() {
         if !REQREG.is_match(&file.filename) {
-          has_found_non_requests_table = true;
+          has_found_all_requests_table = false;
           break 'outer;
         }
       }
     }
-    has_found_non_requests_table
+    has_found_all_requests_table
   }
 
   /// Gets a current list of Dumps for your Canvas Data Instance.
