@@ -1,6 +1,6 @@
 [package]
 name = "cdl-runner"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
   "Canvas Data Support Team <canvasdatahelp@instructure.com>",
   "Instructure Engineering <eng@instructure.com>",
@@ -8,8 +8,9 @@ authors = [
 ]
 
 [features]
-default = [ "postgres_compat" ]
+default = [ "postgres_compat", "mysql_compat" ]
 postgres_compat = [ "postgres", "r2d2_postgres" ]
+mysql_compat = [ "mysql" ]
 
 [dependencies]
 base64 = "0.6"
@@ -37,4 +38,7 @@ tokio-core = "0.1"
 # Postgres Deps
 postgres = { version = "*", optional = true }
 r2d2_postgres = { version = "*", optional = true }
+
+# Mysql Deps
+mysql = { version = "*", optional = true, features = ["ssl"] }
 

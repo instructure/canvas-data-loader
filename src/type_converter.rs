@@ -13,7 +13,12 @@ use settings::DatabaseType;
 pub fn convert_type_for_db(orig_type: String, db_type: DatabaseType) -> Result<String> {
   match orig_type.as_str() {
     "bigint" => Ok("BIGINT".to_owned()),
-    "boolean" => Ok("BOOLEAN".to_owned()),
+    "boolean" => {
+      match db_type {
+        DatabaseType::Psql => Ok("BOOLEAN".to_owned()),
+        DatabaseType::Mysql => Ok("VARCHAR(10)".to_owned()),
+      }
+    },
     "double precision" => {
       match db_type {
         DatabaseType::Psql => Ok("double precision".to_owned()),
@@ -71,15 +76,24 @@ pub fn convert_type_for_db(orig_type: String, db_type: DatabaseType) -> Result<S
 pub fn get_cast_as(orig_type: String, db_type: DatabaseType) -> String {
   match db_type {
     DatabaseType::Psql => {
-      match orig_type.as_str() {
-        "BIGINT" => "int8".to_owned(),
+      match orig_type.to_lowercase().as_str() {
+        "bigint" => "int8".to_owned(),
         "boolean" => "boolean".to_owned(),
         "double precision" => "double precision".to_owned(),
-        "INT" => "int".to_owned(),
-        "TIMESTAMP" => "timestamp".to_owned(),
+        "int" => "int".to_owned(),
+        "timestamp" => "timestamp".to_owned(),
         _ => "".to_owned(),
       }
-    }
-    _ => "".to_owned(),
+    },
+    DatabaseType::Mysql => {
+      match orig_type.to_lowercase().as_str() {
+        "bigint" => "SIGNED".to_owned(),
+        "int" => "SIGNED".to_owned(),
+        "float(17)" => "DECIMAL(34, 17)".to_owned(),
+        "datetime" => "DATETIME".to_owned(),
+        "date" => "DATE".to_owned(),
+        _ => "".to_owned(),
+      }
+    },
   }
 }

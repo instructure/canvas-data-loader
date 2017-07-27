@@ -29,6 +29,9 @@ extern crate postgres;
 #[cfg(feature = "postgres_compat")]
 extern crate r2d2_postgres;
 
+#[cfg(feature = "mysql_compat")]
+extern crate mysql;
+
 pub mod api_client;
 pub mod db_client;
 pub mod errors;
@@ -36,12 +39,18 @@ pub mod importer;
 pub mod settings;
 pub mod type_converter;
 
+#[cfg(feature = "mysql_compat")]
+pub mod mysql_pool;
+
 use db_client::DatabaseClient;
 use rocksdb::DB;
 use settings::DatabaseType;
 
 #[cfg(feature = "postgres_compat")]
 use r2d2_postgres::PostgresConnectionManager;
+
+#[cfg(feature="mysql_compat")]
+use mysql_pool::MysqlConnectionManager;
 
 /// Entry Point to the application.
 fn main() {
@@ -57,9 +66,6 @@ fn main() {
   println!("{:?}", dumps);
   info!("Connecting to RocksDB Store....");
   let whiskey = DB::open_default(settings.get_rocksdb_location()).expect("Failed to open RocksDB");
-  info!("Connecting to the Database...");
-  let db_client = db_client::DatabaseClient::<PostgresConnectionManager>::new(&settings)
-    .expect("Couldn't setup DB Client");
   let latest_schema = api_client.get_latest_schema().expect(
     "Failed to fetch latest schema!",
   );
@@ -123,9 +129,39 @@ fn main() {
       );
       if cfg!(feature = "postgres_compat") {
         if settings.get_database_type() == DatabaseType::Psql {
+          info!("Connecting to the DB");
+          let db_client = db_client::DatabaseClient::<PostgresConnectionManager>::new(&settings)
+                  .expect("Couldn't setup DB Client");
           let importer = importer::Importer::<DatabaseClient<PostgresConnectionManager>>::new(
             api_client.clone(),
-            db_client.clone(),
+            db_client,
+            dump.dump_id.clone(),
+            settings.get_save_location(),
+          );
+          let res = importer.process();
+          if res.is_ok() {
+            let _ = whiskey.put(
+              format!("dump_processed_{}", dump.dump_id).as_bytes(),
+              b"successful",
+            );
+            return Ok(());
+          } else {
+            let _ = whiskey.put(
+              format!("dump_processed_{}", dump.dump_id).as_bytes(),
+              b"failure",
+            );
+            return Err(());
+          }
+        }
+      }
+      if cfg!(feature = "mysql_compat") {
+        if settings.get_database_type() == DatabaseType::Mysql {
+          info!("Connecting to the DB");
+          let db_client = db_client::DatabaseClient::<MysqlConnectionManager>::new(&settings)
+                  .expect("Couldn't setup DB Client");
+          let importer = importer::Importer::<DatabaseClient<MysqlConnectionManager>>::new(
+            api_client.clone(),
+            db_client,
             dump.dump_id.clone(),
             settings.get_save_location(),
           );

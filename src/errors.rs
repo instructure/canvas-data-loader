@@ -19,6 +19,11 @@ error_chain! {
       display("Underlying postgres error!")
     }
 
+    MysqlErr {
+      description("Underlying Mysql error!")
+      display("Underlying Mysql error!")
+    }
+
     ImportErr {
       description("Underlying import errror!")
       display("Underlying import error!")

@@ -9,5 +9,5 @@ api_secret = "FILL_ME_OUT"
 
 [database]
 url = "postgres://localhost/canvas_data_loader"
-# Valid Values are Psql
+# Valid Values are Psql, Mysql
 db_type = "Psql"
