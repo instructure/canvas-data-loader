@@ -40,5 +40,5 @@ postgres = { version = "*", optional = true }
 r2d2_postgres = { version = "*", optional = true }
 
 # Mysql Deps
-mysql = { version = "*", optional = true, features = ["ssl"] }
+mysql = { version = "11.3.1", optional = true, features = ["ssl"] }
 
