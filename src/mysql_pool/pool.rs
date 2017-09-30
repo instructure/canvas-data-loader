@@ -1,5 +1,5 @@
 use mysql::error::Error as MysqlError;
-use mysql::conn::Conn as MysqlBaseConn;
+use mysql::Conn as MysqlBaseConn;
 use mysql::Opts as MysqlOpts;
 use mysql::OptsBuilder as MysqlOptsBuilder;
 use r2d2::ManageConnection as R2D2ManageConnection;
@@ -19,19 +19,15 @@ impl CreateManager<MysqlOptsBuilder> for MysqlConnectionManager {
   type Manager = MysqlConnectionManager;
 
   fn new(params: MysqlOptsBuilder) -> Result<Self::Manager, MysqlError> {
-    Ok(MysqlConnectionManager {
-      params: MysqlOpts::from(params),
-    })
+    Ok(MysqlConnectionManager { params: MysqlOpts::from(params) })
   }
 }
 
-impl <'a> CreateManager<&'a str> for MysqlConnectionManager {
+impl<'a> CreateManager<&'a str> for MysqlConnectionManager {
   type Manager = MysqlConnectionManager;
 
   fn new(params: &'a str) -> Result<Self::Manager, MysqlError> {
-    Ok(MysqlConnectionManager {
-      params: MysqlOpts::from(params),
-    })
+    Ok(MysqlConnectionManager { params: MysqlOpts::from(params) })
   }
 }
 

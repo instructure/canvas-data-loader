@@ -71,7 +71,6 @@ struct FileNameSplit {
 }
 
 impl FileNameSplit {
-
   /// Split a file name that has been downloaded up into pieces to match on table names, and such easier.
   ///
   /// * `split_from` - The filename to go ahead, and split.
@@ -142,30 +141,38 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
   ///
   /// * `table_name` - the name of the table these columns provide for.
   /// * `columns` - A Reference to the list of columns.
-  fn get_id_like_column_from_columns(&self, table_name: String,
-    columns: &BTreeMap<String, Option<String>>) -> Option<String> {
+  fn get_id_like_column_from_columns(
+    &self,
+    table_name: String,
+    columns: &BTreeMap<String, Option<String>>,
+  ) -> Option<String> {
     debug!("Finding ID Like column for: {}", table_name);
+    // Check if we have an ID Column. If so, that's what we should use.
     if columns.contains_key("id") {
       debug!("Has ID Column!");
       return Some("id".to_owned());
     } else {
       debug!("Looking up name!");
+      // Other tables are labeled like assignment_fact, and have assignment_id. Handle those.
       let find_table_name_potential = table_name.rfind("_");
       if find_table_name_potential.is_some() {
-        let (the_final_table_name, _) = table_name.split_at(find_table_name_potential.unwrap()).to_owned();
+        let (the_final_table_name, _) = table_name
+          .split_at(find_table_name_potential.unwrap())
+          .to_owned();
         debug!("Looking up: {}_id", the_final_table_name);
         if columns.contains_key(&format!("{}_id", the_final_table_name.clone())) {
           debug!("Found per table ID!");
-          return Some(format!("{}_id", the_final_table_name))
+          return Some(format!("{}_id", the_final_table_name));
         }
         let find_final_table_name_potential = the_final_table_name.rfind("_");
         if find_final_table_name_potential.is_some() {
           let (the_final_table_name_frd, _) = the_final_table_name
-            .split_at(find_final_table_name_potential.unwrap()).to_owned();
+            .split_at(find_final_table_name_potential.unwrap())
+            .to_owned();
           debug!("Looking up: {}_id", the_final_table_name_frd);
           if columns.contains_key(&format!("{}_id", the_final_table_name_frd.clone())) {
             debug!("Found per table ID!");
-            return Some(format!("{}_id", the_final_table_name_frd))
+            return Some(format!("{}_id", the_final_table_name_frd));
           }
         }
       }
@@ -177,29 +184,40 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
   /// Processes a Dump. Aka Imports it.
   pub fn process(&self) -> Result<()> {
     trace!("Process Called for dump: {}", self.dump_id);
+
+    // Download the Files for this dump.
     try!(self.api_client.download_files_for_dump(
       self.dump_id.clone(),
     ));
+
+    // Glob to find downloaded files.
     let saved_location_glob = format!("{}/{}/*.gz", &self.save_location, &self.dump_id);
     let mut collected: Vec<_> = try!(glob(&saved_location_glob)).collect();
 
+    // Keep a seperate have failed for our iterator, and the tables we've already dropped.
+    // Don't want to drop a table multiple times.
     let mut has_failed = false;
     let mut dropped_tables: Vec<String> = Vec::new();
 
     let _: Vec<_> = collected
       .iter_mut()
       .map(|entry| {
+        // If we've already failed, skip. Don't try to keep importing.
         if has_failed {
           trace!("Skipping Entry: {:?} , due to failing", entry);
           return;
         }
+
+        // If we have a path of a downloaded file.
         if let &mut Ok(ref mut path) = entry {
+          // Get the filename of the downloaded file, and parse it since filenames are determinsitic.
           trace!("Got Path");
           let path_frd = path.clone();
           let file_name = path_frd.file_name().unwrap().to_str().unwrap().to_owned();
           let file_name_split = FileNameSplit::new(file_name).unwrap();
           trace!("Post Split!");
 
+          // Get the table definition for the downloaded table we're looking at.
           let table_def = self.api_client.get_table_definition(
             file_name_split.table_name.clone(),
           );
@@ -210,9 +228,12 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
             return;
           }
           let table_def = table_def.unwrap().unwrap();
+
+          // Get the columns for our table.
           let (column_names, column_defs) = self.get_table_info_from_def(table_def);
           trace!("Post Table Def!");
 
+          // Open up the file for readaing.
           let file = File::open(path_frd);
           if file.is_err() {
             error!("process -> file -> is_err");
@@ -222,6 +243,9 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           }
           let mut file = file.unwrap();
           trace!("Post File Open");
+
+          // Read the entire file into a buffer.
+          // TODO: Maybe oneday switch to a buffered reader?
           let mut buffer = Vec::new();
           let res = file.read_to_end(&mut buffer);
           if res.is_err() {
@@ -232,6 +256,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           }
           trace!("Post Reader");
 
+          // Uncompress the file.
           let decoder = GzDecoder::new(buffer.as_slice());
           if decoder.is_err() {
             error!("process -> decoder -> is_err");
@@ -251,9 +276,13 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           }
           trace!("Post Decode to STR");
           debug!("Decoded String: \n {:?}", finalized_string);
+
+          // Check if the table is "volatile", and may not contain always
+          // certain IDs.
           let is_volatile = VOLATILE_TABLES.contains(&file_name_split.table_name);
           if is_volatile {
             debug!("{:?} is volatile", file_name_split.table_name);
+            // If we haven't dropped this table already. Go ahead, and drop it.
             if !dropped_tables.contains(&file_name_split.table_name) {
               trace!("Has not dropped volatile table yet");
               let drop_res = self.db_adapter.drop_table(
@@ -274,6 +303,8 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
               trace!("Already dropped table");
             }
           }
+
+          // Create the table if it doesn't exist.
           let create_res = self.db_adapter.create_table(
             file_name_split.table_name.clone(),
             column_defs.clone(),
@@ -285,9 +316,12 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
             return;
           }
           trace!("Post create table");
+
+          // For each line in this file.
           for line in finalized_string.lines() {
             trace!("Processing line: [ {:?} ]", line);
             let mut columns = BTreeMap::new();
+            // Split by tabs, gather all columns.
             let split_up_tsv_line: Vec<_> = line.split("\t").collect();
             for (pos, name) in column_names.iter().enumerate() {
               let mut split_up_line = Some(split_up_tsv_line[pos].to_owned());
@@ -300,6 +334,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
             trace!("Inserting Columns: [ {:?} ]", columns);
 
             if is_volatile {
+              // If we're volatile don't check if it exists already, just insert.
               trace!("Is volatile table, performing insert");
               let ins_res = self.db_adapter.insert_record(
                 file_name_split.table_name.clone(),
@@ -313,26 +348,38 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
                 return;
               }
             } else {
+              // Perform a diff if we're not volatile.
               trace!("Is not volatile performing diff.");
-              let id_like_column = self.get_id_like_column_from_columns(
-                file_name_split.table_name.clone(),
-                &columns
-              );
+
+              // Get the ID to diff by.
+              let id_like_column = self.get_id_like_column_from_columns(file_name_split.table_name.clone(), &columns);
               if id_like_column.is_none() {
                 error!("Failed to find table id like column!");
                 has_failed = true;
                 return;
               }
               let id_like_column = id_like_column.unwrap();
-              let id_like_value = columns.get(&id_like_column).unwrap().clone().unwrap().to_owned();
+              let id_like_value = columns
+                .get(&id_like_column)
+                .unwrap()
+                .clone()
+                .unwrap()
+                .to_owned();
               trace!("Performing deletion request for id like column");
-              let del_res = self.db_adapter.drop_record(file_name_split.table_name.clone(), column_defs.clone(),
-                id_like_column, id_like_value);
+              // Send delete request for that ID. on first time seeing this will be no op due to WHERE Clause.
+              let del_res = self.db_adapter.drop_record(
+                file_name_split.table_name.clone(),
+                column_defs.clone(),
+                id_like_column,
+                id_like_value,
+              );
               if del_res.is_err() {
                 error!("Failed to drop column!");
                 has_failed = true;
                 return;
               }
+
+              // Insert the column to overwrite.
               trace!("Performing insert");
               let ins_res = self.db_adapter.insert_record(
                 file_name_split.table_name.clone(),

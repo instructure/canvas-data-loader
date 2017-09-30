@@ -12,7 +12,7 @@ use type_converter::get_cast_as;
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 
 #[cfg(feature = "mysql_compat")]
-use ::mysql_pool::{CreateManager, MysqlConnectionManager};
+use mysql_pool::{CreateManager, MysqlConnectionManager};
 
 /// The Database Client Structure.
 pub struct DatabaseClient<T: ManageConnection> {
@@ -53,8 +53,13 @@ pub trait ImportDatabaseAdapter {
   /// * `column_types` - The types of columns
   /// * `column_name` - The column name to use in the WHERE clause.
   /// * `value` - The columnv value to use in the WHERE clause.
-  fn drop_record(&self, table_name: String, column_types: BTreeMap<String, String>,
-    column_name: String, value: String) -> Result<()>;
+  fn drop_record(
+    &self,
+    table_name: String,
+    column_types: BTreeMap<String, String>,
+    column_name: String,
+    value: String,
+  ) -> Result<()>;
 
   /// Inserts a Record into the Database.
   ///
@@ -104,7 +109,7 @@ impl DatabaseClient<MysqlConnectionManager> {
     }
     let manager = manager.unwrap();
     let pool = Pool::new(config, manager).expect(
-      "Failed to turn a connection into pool. This should never happen"
+      "Failed to turn a connection into pool. This should never happen",
     );
     Ok(DatabaseClient::<MysqlConnectionManager> {
       db_type: DatabaseType::Mysql,
@@ -122,11 +127,14 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
 
   fn drop_table(&self, table_name: String) -> Result<()> {
     trace!("drop_table was called for: [ {} ]", table_name);
+    // Get a aconnection from the pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let connection = connection.unwrap();
+
+    // Execute drop table statement.
     let result = connection.execute(&format!("DROP TABLE IF EXISTS {}", table_name), &[]);
     if result.is_err() {
       error!("drop_table err");
@@ -140,22 +148,30 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
 
   fn create_table(&self, table_name: String, columns: BTreeMap<String, String>) -> Result<()> {
     trace!("create_table was called for: [ {} ]", table_name);
+    // Get a Connection from the underlying DB Connection Pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let connection = connection.unwrap();
+
+    // Create the create table statement. `default` is reseverd word, so replace with
+    // `_default`.
     let mut creation_string = format!("CREATE TABLE IF NOT EXISTS {} (\n", table_name);
     for (key, val) in columns.into_iter() {
       creation_string += &format!("{} {},\n", key.replace("default", "_default"), val);
     }
+    // Cut off the newline + trailing comma.
     let len = creation_string.len();
     creation_string.truncate(len - 2);
+    // Append final parentheses.
     creation_string += ")";
     trace!(
       "Using the following creation string: \n {}",
       creation_string
     );
+
+    // Execute Create Table Statement.
     let result = connection.execute(&creation_string, &[]);
     if result.is_err() {
       error!("create_table err");
@@ -167,31 +183,39 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
     }
   }
 
-  fn drop_record(&self, table_name: String, column_types: BTreeMap<String, String>,
-    column_name: String, value: String) -> Result<()> {
+  fn drop_record(
+    &self,
+    table_name: String,
+    column_types: BTreeMap<String, String>,
+    column_name: String,
+    value: String,
+  ) -> Result<()> {
     trace!(
       "Drop record was called for table: {} on column: {} with value: {}",
       table_name,
       column_name,
       value
     );
+    // Get a Connection from the underlying pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let connection = connection.unwrap();
-    let mut prepared = format!(
+
+    // Prepare a statemtn for deleting from a table.
+    let mut prepared =
+      format!(
       "DELETE FROM {} WHERE {} = ",
       table_name,
       column_name.clone(),
     );
     let the_type = column_types.get(&column_name).unwrap();
+
+    // Make sure the column gets inserted as the right type to prevent db errors.
     let cast_as = get_cast_as(the_type.to_owned(), self.db_type.clone());
     if cast_as == "" {
-      prepared += &format!(
-        "{:?}",
-        value.replace("'", "").replace("\"", "")
-      ).replace("\"", "'");
+      prepared += &format!("{:?}", value.replace("'", "").replace("\"", "")).replace("\"", "'");
     } else {
       prepared += &format!(
         "{:?}::{}",
@@ -199,6 +223,8 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
         cast_as
       ).replace("\"", "'");
     }
+
+    // Execute the preapred delete statement.
     let statement = connection.execute(&prepared, &[]);
     if statement.is_err() {
       error!("drop_record err");
@@ -216,26 +242,35 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
     columns: BTreeMap<String, Option<String>>,
   ) -> Result<()> {
     trace!("insert_record was called for table: {}", table_name);
+    // Get a connection from the underlying pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let connection = connection.unwrap();
+
+    // Create the insert into statement.
     let mut insert_string = format!("INSERT INTO {} (", table_name);
     let mut types = BTreeMap::new();
 
+    // We need to know all the types of the keys for the INSERT INTO () VALUES ()
     for (pos, key) in columns.keys().enumerate() {
       insert_string += &format!("{},", key.replace("default", "_default"));
       types.insert(pos, column_types.get(key).unwrap().to_owned());
     }
     let mut len = insert_string.len();
+    // Remove Trailing Comma.
     insert_string.truncate(len - 1);
+
+    // Loop over actual values.
     insert_string += ") VALUES (";
     for (pos, val) in columns.values().enumerate() {
+      // Handle Nulls
       if val.is_none() {
         insert_string += "NULL,";
       } else {
         let the_type = types.get(&pos).unwrap();
+        // Cast the value as the right type.
         let cast_as = get_cast_as(the_type.to_owned(), self.db_type.clone());
         if cast_as == "" {
           insert_string += &format!(
@@ -252,9 +287,13 @@ impl ImportDatabaseAdapter for DatabaseClient<PostgresConnectionManager> {
       }
     }
     len = insert_string.len();
+
+    // Remove Trailing Comma.
     insert_string.truncate(len - 1);
     insert_string += ")";
     debug!("Insert_record string looks like: \n {}", insert_string);
+
+    // Execute.
     let statement = connection.execute(&insert_string, &[]);
     if statement.is_err() {
       error!("insert error");
@@ -276,11 +315,15 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
 
   fn drop_table(&self, table_name: String) -> Result<()> {
     trace!("drop_table was called for: [ {} ]", table_name);
+
+    // Get connection from the underlying pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::MysqlErr.into());
     }
     let mut connection = connection.unwrap();
+
+    // Create DropTable statement.
     let result = connection.query(&format!("DROP TABLE IF EXISTS {}", table_name));
     if result.is_err() {
       error!("drop_table err");
@@ -294,22 +337,36 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
 
   fn create_table(&self, table_name: String, columns: BTreeMap<String, String>) -> Result<()> {
     trace!("create_table was called for: [ {} ]", table_name);
+    // Get connection from the underlying pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::MysqlErr.into());
     }
     let mut connection = connection.unwrap();
+
+    // Form Creation String. `default`, and `generated` are reserved words.
     let mut creation_string = format!("CREATE TABLE IF NOT EXISTS {} (\n", table_name);
     for (key, val) in columns.into_iter() {
-      creation_string += &format!("{} {},\n", key.replace("default", "_default").replace("generated", "_generated"), val);
+      creation_string += &format!(
+        "{} {},\n",
+        key.replace("default", "_default").replace(
+          "generated",
+          "_generated",
+        ),
+        val
+      );
     }
     let len = creation_string.len();
+    // Remove Trailing newline, and comma.
     creation_string.truncate(len - 2);
+    // Ensure Character set is utf8mb4.
     creation_string += ") CHARACTER SET utf8mb4";
     trace!(
       "Using the following creation string: \n {}",
       creation_string
     );
+
+    // Execute.
     let result = connection.query(&creation_string);
     if result.is_err() {
       error!("create_table err");
@@ -321,31 +378,39 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
     }
   }
 
-  fn drop_record(&self, table_name: String, column_types: BTreeMap<String, String>,
-    column_name: String, value: String) -> Result<()> {
+  fn drop_record(
+    &self,
+    table_name: String,
+    column_types: BTreeMap<String, String>,
+    column_name: String,
+    value: String,
+  ) -> Result<()> {
     trace!(
       "Drop record was called for table: {} on column: {} with value: {}",
       table_name,
       column_name,
       value
     );
+    // Grab a Connection from the pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::MysqlErr.into());
     }
     let mut connection = connection.unwrap();
-    let mut prepared = format!(
+
+    // Start Preparing a Delete from statement.
+    let mut prepared =
+      format!(
       "DELETE FROM {} WHERE {} = ",
       table_name,
       column_name.clone(),
     );
     let the_type = column_types.get(&column_name).unwrap();
+
+    // Cast the type correctly.
     let cast_as = get_cast_as(the_type.to_owned(), self.db_type.clone());
     if cast_as == "" {
-      prepared += &format!(
-        "{:?}",
-        value.replace("'", "").replace("\"", "")
-      ).replace("\"", "'");
+      prepared += &format!("{:?}", value.replace("'", "").replace("\"", "")).replace("\"", "'");
     } else {
       prepared += &format!(
         "CAST({:?} as {})",
@@ -353,6 +418,8 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
         cast_as
       ).replace("\"", "'");
     }
+
+    // Execute.
     let statement = connection.query(&prepared);
     if statement.is_err() {
       error!("drop_record err");
@@ -370,26 +437,41 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
     columns: BTreeMap<String, Option<String>>,
   ) -> Result<()> {
     trace!("insert_record was called for table: {}", table_name);
+    // Get connection from the underlying pool.
     let connection = self.underlying_pool.get();
     if connection.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let mut connection = connection.unwrap();
+
+    // Start Preparing insert into statements.
     let mut insert_string = format!("INSERT INTO {} (", table_name);
     let mut types = BTreeMap::new();
 
+    // We need the types for INSERT INTO () VALUES (). Get Those.
     for (pos, key) in columns.keys().enumerate() {
-      insert_string += &format!("{},", key.replace("default", "_default").replace("generated", "_generated"));
+      insert_string += &format!(
+        "{},",
+        key.replace("default", "_default").replace(
+          "generated",
+          "_generated",
+        )
+      );
       types.insert(pos, column_types.get(key).unwrap().to_owned());
     }
     let mut len = insert_string.len();
+    // Remove trailing comma.
     insert_string.truncate(len - 1);
+
+    // Start Inserting Values.
     insert_string += ") VALUES (";
     for (pos, val) in columns.values().enumerate() {
       if val.is_none() {
+        // Handle NULLs.
         insert_string += "NULL,";
       } else {
         let the_type = types.get(&pos).unwrap();
+        // Cast the type correctly.
         let cast_as = get_cast_as(the_type.to_owned(), self.db_type.clone());
         if cast_as == "" {
           insert_string += &format!(
@@ -406,9 +488,12 @@ impl ImportDatabaseAdapter for DatabaseClient<MysqlConnectionManager> {
       }
     }
     len = insert_string.len();
+    // Remove trailing commas.
     insert_string.truncate(len - 1);
     insert_string += ")";
     debug!("Insert_record string looks like: \n {}", insert_string);
+
+    // Execute.
     let statement = connection.query(&insert_string);
     if statement.is_err() {
       error!("insert error");

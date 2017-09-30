@@ -2,6 +2,9 @@
 save_location = "/tmp/cdl-save"
 rocksdb_location = "/tmp/cdl-rocksdb"
 skip_historical_imports = true
+# uncomment this line below, to only import the latest dump: Note you may miss dumps on
+# days where we do historical refreshes. It's good for a first initial import.
+# only_load_final = true
 
 [canvasdataauth]
 api_key = "FILL_ME_OUT"

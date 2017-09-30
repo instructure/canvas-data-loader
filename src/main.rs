@@ -49,39 +49,65 @@ use settings::DatabaseType;
 #[cfg(feature = "postgres_compat")]
 use r2d2_postgres::PostgresConnectionManager;
 
-#[cfg(feature="mysql_compat")]
+#[cfg(feature = "mysql_compat")]
 use mysql_pool::MysqlConnectionManager;
 
 /// Entry Point to the application.
 fn main() {
   env_logger::init().expect("Failed to setup logger!");
 
+  // Initalize Settings.
   let settings = settings::Settings::new();
+  let has_errord = false;
   info!("Setting up API Client...");
+
+  // Get the dump listing, and setup some variables for iteration.
   let api_client = api_client::CanvasDataApiClient::new(&settings);
   let mut dumps = api_client.get_dumps().expect("Failed to get List of Dumps");
   dumps.sort_by(|dump_one, dump_two| {
     dump_one.created_at.cmp(&dump_two.created_at)
   });
-  println!("{:?}", dumps);
+  let dumps_len = dumps.len();
+  let only_final_dump = settings.get_should_only_load_final();
+  let mut current_dumps_pos = 0;
+  debug!("{:?}", dumps);
+
+  // Connect to the local KV Store.
   info!("Connecting to RocksDB Store....");
   let whiskey = DB::open_default(settings.get_rocksdb_location()).expect("Failed to open RocksDB");
+
+  // Get the latest schema.
   let latest_schema = api_client.get_latest_schema().expect(
     "Failed to fetch latest schema!",
   );
-  let has_errord = false;
+
   let _: Vec<_> = dumps
     .into_iter()
     .map(|dump| {
+      // Check if we're only importing the last dump.
+      current_dumps_pos = current_dumps_pos + 1;
+      if current_dumps_pos != dumps_len && only_final_dump {
+        info!("Skipping dump: {} due to only final selected", dump.dump_id);
+        return Ok(());
+      }
+
+      // Check if another dump has failed importing already.
       if has_errord {
-        info!("Skipping dump: {} due to previous failure in import", dump.dump_id);
+        info!(
+          "Skipping dump: {} due to previous failure in import",
+          dump.dump_id
+        );
         return Err(());
       }
+
+      // Check if the dump has finished populating.
       debug!("Entering debug loop for dump: {}", dump.dump_id);
       if !dump.finished {
         info!("Skipping dump: {} because it's not finished.", dump.dump_id);
         return Ok(());
       }
+
+      // Check if we've already processed this dump.
       let result = whiskey.get(
         format!("dump_processed_{}", dump.dump_id.clone()).as_bytes(),
       );
@@ -102,6 +128,8 @@ fn main() {
           }
         }
       }
+
+      // Check if the dump queued for import is the correct schema version.
       if latest_schema.version != dump.schema_version {
         let _ = whiskey.put(
           format!("dump_processed_{}", dump.dump_id.clone()).as_bytes(),
@@ -109,29 +137,40 @@ fn main() {
         );
         return Ok(());
       }
+
+      // Get the files for this particular dump.
       let files_in_dump = api_client.get_files_for_dump(dump.dump_id.clone());
       if files_in_dump.is_err() {
         info!("Failed to list files for dump. Skipping...");
         return Ok(());
       }
       let files_in_dump = files_in_dump.unwrap();
+
+      // Check if the dump is a historical refresh.
       if api_client.is_historical_refresh(files_in_dump) && settings.get_should_skip_historical_imports() {
-        info!("Skipping dump: {} since it's a historical refresh", dump.dump_id.clone());
+        info!(
+          "Skipping dump: {} since it's a historical refresh",
+          dump.dump_id.clone()
+        );
         let _ = whiskey.put(
           format!("dump_processed_{}", dump.dump_id.clone()).as_bytes(),
           b"successful",
         );
         return Ok(());
       }
+
+      // Set that we're attempting to improt this.
       let _ = whiskey.put(
         format!("dump_processed_{}", dump.dump_id.clone()).as_bytes(),
         b"in_progress",
       );
+
+      // If we have postgres compatability, and are configured for postgres, import that.
       if cfg!(feature = "postgres_compat") {
         if settings.get_database_type() == DatabaseType::Psql {
           info!("Connecting to the DB");
           let db_client = db_client::DatabaseClient::<PostgresConnectionManager>::new(&settings)
-                  .expect("Couldn't setup DB Client");
+            .expect("Couldn't setup DB Client");
           let importer = importer::Importer::<DatabaseClient<PostgresConnectionManager>>::new(
             api_client.clone(),
             db_client,
@@ -154,11 +193,13 @@ fn main() {
           }
         }
       }
+
+      // If we have mysql compatability, and are configured for mysql, import that.
       if cfg!(feature = "mysql_compat") {
         if settings.get_database_type() == DatabaseType::Mysql {
           info!("Connecting to the DB");
           let db_client = db_client::DatabaseClient::<MysqlConnectionManager>::new(&settings)
-                  .expect("Couldn't setup DB Client");
+            .expect("Couldn't setup DB Client");
           let importer = importer::Importer::<DatabaseClient<MysqlConnectionManager>>::new(
             api_client.clone(),
             db_client,
@@ -181,6 +222,7 @@ fn main() {
           }
         }
       }
+
       Err(())
     })
     .collect();

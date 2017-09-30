@@ -18,7 +18,7 @@ pub fn convert_type_for_db(orig_type: String, db_type: DatabaseType) -> Result<S
         DatabaseType::Psql => Ok("BOOLEAN".to_owned()),
         DatabaseType::Mysql => Ok("VARCHAR(10)".to_owned()),
       }
-    },
+    }
     "double precision" => {
       match db_type {
         DatabaseType::Psql => Ok("double precision".to_owned()),
@@ -84,7 +84,7 @@ pub fn get_cast_as(orig_type: String, db_type: DatabaseType) -> String {
         "timestamp" => "timestamp".to_owned(),
         _ => "".to_owned(),
       }
-    },
+    }
     DatabaseType::Mysql => {
       match orig_type.to_lowercase().as_str() {
         "bigint" => "SIGNED".to_owned(),
@@ -94,6 +94,6 @@ pub fn get_cast_as(orig_type: String, db_type: DatabaseType) -> String {
         "date" => "DATE".to_owned(),
         _ => "".to_owned(),
       }
-    },
+    }
   }
 }

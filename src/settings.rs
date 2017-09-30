@@ -49,7 +49,9 @@ pub struct Settings {
   /// The place to store the Rocks DB Database.
   rocksdb_location: String,
   /// Whether or not to skip historical imports.
-  skip_historical_imports: bool
+  skip_historical_imports: bool,
+  /// Only attempts to load the latest import.
+  only_load_final: Option<bool>,
 }
 
 impl Settings {
@@ -68,7 +70,7 @@ impl Settings {
       .merge(Environment::with_prefix("cdl"))
       .expect("Transient error getting environment variables");
 
-    base_configuration.deserialize().expect(
+    base_configuration.try_into().expect(
       "Failed to create base configuration",
     )
   }
@@ -86,6 +88,11 @@ impl Settings {
   /// Gets the notion of whether or not to skip historical imports from the settings.
   pub fn get_should_skip_historical_imports(&self) -> bool {
     self.skip_historical_imports
+  }
+
+  /// Gets the notion of whether or not to only load the final import.
+  pub fn get_should_only_load_final(&self) -> bool {
+    self.only_load_final.unwrap_or(false)
   }
 
   /// Gets the database url provided by the settings.
