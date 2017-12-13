@@ -37,7 +37,7 @@ tokio-core = "0.1"
 
 # Postgres Deps
 postgres = { version = "*", optional = true }
-r2d2_postgres = { version = "*", optional = true }
+r2d2_postgres = { version = "0.13", optional = true }
 
 # Mysql Deps
 mysql = { version = "12", optional = true, features = ["ssl"] }
