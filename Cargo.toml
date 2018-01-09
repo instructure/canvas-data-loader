@@ -15,7 +15,10 @@ mysql_compat = [ "mysql" ]
 [dependencies]
 base64 = "0.7"
 chrono = { version = "0.4", features = [ "serde" ] }
-config = "0.7"
+# TODO(KFC): Update when config-rs can build on released version. Not sure what broke down here.
+# PR For Reference: https://github.com/mehcode/config-rs/pull/50
+# config = "0.7"
+config = { git = "https://github.com/snipsco/config-rs/", rev = "44e75a74bddf5c96d12dfdda18a4d3247a1a3bbf" }
 error-chain = "0.11"
 env_logger = "*"
 flate2 = { version = "0.2", features = ["zlib"], default-features = false }
