@@ -54,7 +54,7 @@ use mysql_pool::MysqlConnectionManager;
 
 /// Entry Point to the application.
 fn main() {
-  env_logger::init().expect("Failed to setup logger!");
+  env_logger::init();
 
   // Initalize Settings.
   let settings = settings::Settings::new();
