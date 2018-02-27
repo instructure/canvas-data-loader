@@ -65,9 +65,11 @@ impl Settings {
     base_configuration
       .merge(File::with_name("config/local").required(false))
       .expect("Transient error getting local configuration.");
-
+    
+    let mut env = Environment::with_prefix("cdl");
+    env.separator("__".to_string());
     base_configuration
-      .merge(Environment::with_prefix("cdl"))
+      .merge(env)
       .expect("Transient error getting environment variables");
 
     base_configuration.try_into().expect(
