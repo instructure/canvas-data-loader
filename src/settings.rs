@@ -67,7 +67,7 @@ impl Settings {
       .expect("Transient error getting local configuration.");
     
     let mut env = Environment::with_prefix("cdl");
-    env.separator("__".to_string());
+    env.separator("__".to_owned());
     base_configuration
       .merge(env)
       .expect("Transient error getting environment variables");
