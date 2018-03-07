@@ -9,7 +9,7 @@ It should be noted although there are better options out there, there isn't a re
 the loader to handle all of your imports everyday. The Canvas Data Loader could for example handle your
 imports at first, and then later off be handed to a more stable process.
 
-## Suppport ##
+## Support ##
 
 Although this is under the Instructure Repo this is purely an example application, and as such is not fully supported by Instructure.
 
@@ -32,6 +32,26 @@ are not using linux.
   * `crontab -e`
   * Enter on it's own line, replacing the path to your importer: `0 * * * * cd <my_cdl_location> && RUST_LOG=info ./target/release/cdl-runner > /var/log/cdl-log 2>&1`
 * Tadah!
+
+### Configuration Using Environment Variables
+
+Configuration can also be done using environment variables instead of, or in addition to the `./config/local.toml` file. For example, you may wish to use environment variables for the API key/secret and use the file for the remaining configuration.
+
+Example:
+
+`export cdl__canvasdataauth__api_key=abcdefg123456`
+`export cdl__canvasdataauth__api_secret=123456abcdefg`
+
+Possible environment variables:
+
+- `cdl__canvasdataauth__api_key`
+- `cdl__canvasdataauth__api_secret`
+- `cdl__database__db_type`
+- `cdl__database__url` 
+- `cdl__only_load_final`
+- `cdl__rocksdb_location`
+- `cdl__save_location`
+- `cdl__skip_historical_imports`
 
 ## License ##
 
