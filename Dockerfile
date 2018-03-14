@@ -18,6 +18,7 @@ FROM debian:stretch-slim
 
 RUN apt-get update && apt-get -y --no-install-recommends install libssl1.1 ca-certificates && apt-get clean && rm -rf /var/lib/apt/lists/*
 COPY --from=cdl-build /tmp/canvas-data-loader/target/release/cdl-runner .
+COPY ./config ./config
 
 ENV RUST_LOG info
 CMD ./cdl-runner
