@@ -256,6 +256,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
             return;
           }
           let table_def = table_def.unwrap().unwrap();
+          let is_volatile_table = VOLATILE_TABLES.contains(&file_name_split.table_name) || is_all_volatile;
 
           // Get the columns for our table.
           let (column_names, column_defs) = self.get_table_info_from_def(table_def);
@@ -304,7 +305,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
             column_defs.clone(),
           );
           if create_res.is_err() {
-            error!("prcoess -> is_volatile -> create_res -> is_err");
+            error!("prcoess -> create_res -> is_err");
             error!("{:?}", create_res.err().unwrap());
             has_failed.store(true, Ordering::Relaxed);
             return;
@@ -327,7 +328,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
 
             trace!("Inserting Columns: [ {:?} ]", columns);
 
-            if VOLATILE_TABLES.contains(&file_name_split.table_name) || is_all_volatile {
+            if is_volatile_table {
               // If we're volatile don't check if it exists already, just insert.
               trace!("Is volatile table, performing insert");
               let ins_res = self.db_adapter.insert_record(
