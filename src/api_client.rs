@@ -3,19 +3,16 @@
 use base64::encode as B64Encode;
 use chrono::prelude::*;
 use errors::*;
-use futures::{Future, Stream};
-use futures::future::join_all;
-use hyper::{Client, Method, Request};
-use hyper_tls::HttpsConnector;
+use rayon::prelude::*;
 use regex::Regex;
+use reqwest::{Client as HttpClient, Method, Request};
+use reqwest::header::HeaderValue;
 use ring::{digest, hmac};
-use serde_json::from_slice as JsonFromSlice;
 use settings::Settings;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
-use tokio_core::reactor::Core;
 
 lazy_static! {
   static ref REQREG: Regex = Regex::new(r"^requests.*?$").expect("Invalid Static Requests Regex");
@@ -30,6 +27,8 @@ pub struct CanvasDataApiClient {
   api_secret: String,
   /// The place to save files.
   save_location: String,
+  /// The Reqwest Client,
+  client: HttpClient,
 }
 
 impl CanvasDataApiClient {
@@ -43,6 +42,7 @@ impl CanvasDataApiClient {
       api_key: settings.get_canvas_data_api_key(),
       api_secret: settings.get_canvas_data_api_secret(),
       save_location: settings.get_save_location(),
+      client: HttpClient::new(),
     }
   }
 
@@ -114,22 +114,18 @@ impl CanvasDataApiClient {
   /// Gets a current list of Dumps for your Canvas Data Instance.
   pub fn get_dumps(&self) -> Result<Vec<DumpInList>> {
     trace!("Get Dumps was called.");
-    let mut core = try!(Core::new());
-    let client = Client::configure()
-      .connector(try!(HttpsConnector::new(4, &core.handle())))
-      .build(&core.handle());
 
     let uri = try!("https://portal.inshosteddata.com/api/account/self/dump".parse());
-    let mut req: Request = Request::new(Method::Get, uri);
+    let mut req: Request = Request::new(Method::GET, uri);
     let date_str = self.get_current_date();
-    req.headers_mut().set_raw("Date", date_str.clone());
-    req.headers_mut().set_raw(
+    req.headers_mut().insert("Date", HeaderValue::from_str(&date_str).expect("Couldn't turn string into header value!"));
+    req.headers_mut().insert(
       "Content-Type",
-      "application/json".to_owned(),
+      HeaderValue::from_static("application/json"),
     );
-    req.headers_mut().set_raw(
+    req.headers_mut().insert(
       "Authorization",
-      self.compute_auth_header(
+      HeaderValue::from_str(&self.compute_auth_header(
         "GET",
         "portal.inshosteddata.com",
         "application/json",
@@ -137,39 +133,31 @@ impl CanvasDataApiClient {
         "/api/account/self/dump",
         "",
         &date_str,
-      ),
+      )).expect("Couldn't turn string into header value!"),
     );
-    let work = client.request(req).and_then(|res| {
-      res.body().concat2().and_then(move |body| {
-        let value: Vec<DumpInList> = try!(JsonFromSlice(&body).map_err(|e| {
-          io::Error::new(io::ErrorKind::Other, e)
-        }));
-        Ok(value)
-      })
-    });
 
-    Ok(try!(core.run(work)))
+    Ok(try!(self.client.execute(req).and_then(|mut res| {
+      res.json()
+    }).map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, e)
+    })))
   }
 
   /// Gets the latest schema.
   pub fn get_latest_schema(&self) -> Result<SchemaDefinition> {
     trace!("Get latest schema was called");
-    let mut core = try!(Core::new());
-    let client = Client::configure()
-      .connector(try!(HttpsConnector::new(4, &core.handle())))
-      .build(&core.handle());
 
     let uri = try!("https://portal.inshosteddata.com/api/schema/latest".parse());
-    let mut req: Request = Request::new(Method::Get, uri);
+    let mut req: Request = Request::new(Method::GET, uri);
     let date_str = self.get_current_date();
-    req.headers_mut().set_raw("Date", date_str.clone());
-    req.headers_mut().set_raw(
+    req.headers_mut().insert("Date", HeaderValue::from_str(&date_str).expect("Failed to turn string into header value!"));
+    req.headers_mut().insert(
       "Content-Type",
-      "application/json".to_owned(),
+      HeaderValue::from_static("application/json"),
     );
-    req.headers_mut().set_raw(
+    req.headers_mut().insert(
       "Authorization",
-      self.compute_auth_header(
+      HeaderValue::from_str(&self.compute_auth_header(
         "GET",
         "portal.inshosteddata.com",
         "application/json",
@@ -177,18 +165,14 @@ impl CanvasDataApiClient {
         "/api/schema/latest",
         "",
         &date_str,
-      ),
+      )).expect("Failed to turn string into header value!"),
     );
-    let work = client.request(req).and_then(|res| {
-      res.body().concat2().and_then(move |body| {
-        let value: SchemaDefinition = try!(JsonFromSlice(&body).map_err(|e| {
-          io::Error::new(io::ErrorKind::Other, e)
-        }));
-        Ok(value)
-      })
-    });
 
-    Ok(try!(core.run(work)))
+    Ok(try!(self.client.execute(req).and_then(|mut res| {
+      res.json()
+    }).map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, e)
+    })))
   }
 
   /// Gets the Table Definition for a Specific Table.
@@ -196,22 +180,18 @@ impl CanvasDataApiClient {
   /// * `table_name` - The Table name to get the definition for.
   pub fn get_table_definition(&self, table_name: String) -> Result<Option<TableDefinition>> {
     trace!("get_table_definition was called for: [ {} ]", table_name);
-    let mut core = try!(Core::new());
-    let client = Client::configure()
-      .connector(try!(HttpsConnector::new(4, &core.handle())))
-      .build(&core.handle());
 
     let uri = try!("https://portal.inshosteddata.com/api/schema/latest".parse());
-    let mut req: Request = Request::new(Method::Get, uri);
+    let mut req: Request = Request::new(Method::GET, uri);
     let date_str = self.get_current_date();
-    req.headers_mut().set_raw("Date", date_str.clone());
-    req.headers_mut().set_raw(
+    req.headers_mut().insert("Date", HeaderValue::from_str(&date_str).expect("Failed to turn string into headervalue!"));
+    req.headers_mut().insert(
       "Content-Type",
-      "application/json".to_owned(),
+      HeaderValue::from_static("application/json"),
     );
-    req.headers_mut().set_raw(
+    req.headers_mut().insert(
       "Authorization",
-      self.compute_auth_header(
+      HeaderValue::from_str(&self.compute_auth_header(
         "GET",
         "portal.inshosteddata.com",
         "application/json",
@@ -219,25 +199,25 @@ impl CanvasDataApiClient {
         "/api/schema/latest",
         "",
         &date_str,
-      ),
+      )).expect("Failed to turn string into headervalue!"),
     );
-    let work = client.request(req).and_then(|res| {
-      res.body().concat2().and_then(move |body| {
-        let value: SchemaDefinition = try!(JsonFromSlice(&body).map_err(|e| {
-          io::Error::new(io::ErrorKind::Other, e)
-        }));
-        let mut ret = None;
-        for table_def in value.schema.values().cloned() {
-          if table_def.table_name.to_lowercase() == table_name {
-            ret = Some(table_def);
-            break;
-          }
-        }
-        Ok(ret)
-      })
-    });
 
-    Ok(try!(core.run(work)))
+    Ok(try!(self.client.execute(req).and_then(|mut res| {
+      res.json()
+    }).map(|res: SchemaDefinition| {
+      let mut ret = None;
+
+      for table_def in res.schema.values() {
+        if table_def.table_name.to_lowercase() == table_name {
+          ret = Some(table_def.clone());
+          break;
+        }
+      }
+
+      ret
+    }).map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, e)
+    })))
   }
 
   /// Gets the list of files for a specific dump.
@@ -248,23 +228,19 @@ impl CanvasDataApiClient {
       "Get files for dump was called with dump id: [ {} ]",
       dump_id
     );
-    let mut core = try!(Core::new());
-    let client = Client::configure()
-      .connector(try!(HttpsConnector::new(4, &core.handle())))
-      .build(&core.handle());
 
     let path = format!("/api/account/self/file/byDump/{}", dump_id);
     let uri = try!(format!("https://portal.inshosteddata.com{}", &path).parse());
-    let mut req: Request = Request::new(Method::Get, uri);
+    let mut req: Request = Request::new(Method::GET, uri);
     let date_str = self.get_current_date();
-    req.headers_mut().set_raw("Date", date_str.clone());
-    req.headers_mut().set_raw(
+    req.headers_mut().insert("Date", HeaderValue::from_str(&date_str).expect("Failed to turn string into header value!"));
+    req.headers_mut().insert(
       "Content-Type",
-      "application/json".to_owned(),
+      HeaderValue::from_static("application/json"),
     );
-    req.headers_mut().set_raw(
+    req.headers_mut().insert(
       "Authorization",
-      self.compute_auth_header(
+      HeaderValue::from_str(&self.compute_auth_header(
         "GET",
         "portal.inshosteddata.com",
         "application/json",
@@ -272,18 +248,14 @@ impl CanvasDataApiClient {
         &path,
         "",
         &date_str,
-      ),
+      )).expect("Failed to turn string into headervalue!"),
     );
-    let work = client.request(req).and_then(|res| {
-      res.body().concat2().and_then(move |body| {
-        let value: FilesInDumpResponse = try!(JsonFromSlice(&body).map_err(|e| {
-          io::Error::new(io::ErrorKind::Other, e)
-        }));
-        Ok(value)
-      })
-    });
 
-    Ok(try!(core.run(work)))
+    Ok(try!(self.client.execute(req).and_then(|mut res| {
+      res.json()
+    }).map_err(|e| {
+      io::Error::new(io::ErrorKind::Other, e)
+    })))
   }
 
   /// Download all files for a specific dump.
@@ -297,13 +269,8 @@ impl CanvasDataApiClient {
     let save_location = format!("{}/{}", self.save_location, &dump_id);
     try!(fs::create_dir_all(save_location.clone()));
     let files_in_dump = try!(self.get_files_for_dump(dump_id.clone()));
-    let mut core = try!(Core::new());
-    let client = Client::configure()
-      .connector(try!(HttpsConnector::new(4, &core.handle())))
-      .build(&core.handle());
-    let mut work_to_do = vec![];
 
-    'artifacts: for table_artifact in files_in_dump.artifacts_by_table.values().cloned() {
+    files_in_dump.artifacts_by_table.par_iter().map(move |(_, table_artifact)| {
       for file_to_download in table_artifact.files.iter().cloned() {
         let finalized_to_download_path = format!("{}/{}", &save_location, &file_to_download.filename);
         let cloned_download_path = finalized_to_download_path.clone();
@@ -314,26 +281,23 @@ impl CanvasDataApiClient {
             cloned_download_path
           );
           // Assume the entire artifact is downloaded.
-          continue 'artifacts;
+          continue;
         } else {
           debug!(
             "{:?} does not exist, downloading files",
             cloned_download_path
           );
-          let uri = try!(file_to_download.url.parse());
-          work_to_do.push(client.get(uri).and_then(move |res| {
+          let uri = file_to_download.url.parse().expect("Failed to parse file url form hosted-data!");
+          let req = Request::new(Method::GET, uri);
+          self.client.execute(req).map(move |mut res| {
             let download_path = cloned_download_path;
-            let mut file = File::create(Path::new(&download_path)).expect("Failed to create download file");
-            res.body().for_each(move |chunk| {
-              let _ = file.write(&*chunk);
-              Ok(())
-            })
-          }));
+            let mut file = File::create(Path::new(&download_path)).expect("Failed to create download file!");
+
+            res.copy_to(&mut file).expect("Failed to copy to file!")
+          }).expect("Failed to download table!");
         }
       }
-    }
-
-    try!(core.run(join_all(work_to_do)));
+    }).count();
 
     trace!("Done Downloading Files for: {}", dump_id);
 
@@ -369,6 +333,7 @@ pub struct DumpInList {
   #[serde(rename = "schemaVersion")]
   pub schema_version: String,
 }
+unsafe impl Send for DumpInList {}
 
 /// The list of files returned from a file in dump response.
 #[derive(Clone, Debug, Deserialize)]
@@ -401,6 +366,7 @@ pub struct FilesInDumpResponse {
   #[serde(rename = "artifactsByTable")]
   pub artifacts_by_table: BTreeMap<String, ArtifactByTable>,
 }
+unsafe impl Send for FilesInDumpResponse {}
 
 /// A list of artifacts per table.
 #[derive(Clone, Debug, Deserialize)]
@@ -413,6 +379,7 @@ pub struct ArtifactByTable {
   /// A List of files for this table.
   pub files: Vec<BasicFile>,
 }
+unsafe impl Send for ArtifactByTable {}
 
 /// A File object returned in ArtifactsByTable.
 #[derive(Clone, Debug, Deserialize)]
@@ -422,6 +389,7 @@ pub struct BasicFile {
   /// The filename of this file.
   pub filename: String,
 }
+unsafe impl Send for BasicFile {}
 
 /// The Schema Definition returned by Canvas Data.
 #[derive(Clone, Debug, Deserialize)]
@@ -431,6 +399,7 @@ pub struct SchemaDefinition {
   /// The Actual Schema Object itself.
   pub schema: BTreeMap<String, TableDefinition>,
 }
+unsafe impl Send for SchemaDefinition {}
 
 /// A Definition for a Table returned by the Schema API.
 #[derive(Clone, Debug, Deserialize)]
@@ -449,6 +418,7 @@ pub struct TableDefinition {
   /// A List of it's columns.
   pub columns: Vec<ColumnDefinition>,
 }
+unsafe impl Send for TableDefinition {}
 
 /// A Definition for a Column returned by the Schema API.
 #[derive(Clone, Debug, Deserialize)]
@@ -465,6 +435,7 @@ pub struct ColumnDefinition {
   /// Optional information about the dimension.
   pub dimension: Option<DimensionDefinition>,
 }
+unsafe impl Send for ColumnDefinition {}
 
 /// Dimension information returned by the Schema API.
 #[derive(Clone, Debug, Deserialize)]
@@ -476,3 +447,4 @@ pub struct DimensionDefinition {
   /// An optional role to attach to this dimension.
   pub role: Option<String>,
 }
+unsafe impl Send for DimensionDefinition {}

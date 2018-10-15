@@ -52,6 +52,8 @@ pub struct Settings {
   skip_historical_imports: bool,
   /// Only attempts to load the latest import.
   only_load_final: Option<bool>,
+  /// Treats all tables as volatile.
+  all_tables_volatile: Option<bool>,
 }
 
 impl Settings {
@@ -65,9 +67,9 @@ impl Settings {
     base_configuration
       .merge(File::with_name("config/local").required(false))
       .expect("Transient error getting local configuration.");
-    
+
     let mut env = Environment::with_prefix("cdl");
-    env.separator("__".to_owned());
+    env = env.separator("__");
     base_configuration
       .merge(env)
       .expect("Transient error getting environment variables");
@@ -95,6 +97,11 @@ impl Settings {
   /// Gets the notion of whether or not to only load the final import.
   pub fn get_should_only_load_final(&self) -> bool {
     self.only_load_final.unwrap_or(false)
+  }
+
+  /// Gets the notion of whether or not to treat all tables as volatile.
+  pub fn get_all_tables_volatile(&self) -> bool {
+    self.all_tables_volatile.unwrap_or(false)
   }
 
   /// Gets the database url provided by the settings.

@@ -2,7 +2,7 @@
 //! This will control all the connections/inserts/updates/etc.
 
 use errors::*;
-use r2d2::{Config, ManageConnection, Pool};
+use r2d2::{ManageConnection, Pool};
 use std::clone::Clone;
 use std::collections::BTreeMap;
 use settings::{DatabaseType, Settings};
@@ -80,13 +80,12 @@ impl DatabaseClient<PostgresConnectionManager> {
   ///
   /// `settings` - The underlying settings object to configure ourselves with.
   pub fn new(settings: &Settings) -> Result<DatabaseClient<PostgresConnectionManager>> {
-    let config = Config::default();
     let manager = PostgresConnectionManager::new(settings.get_database_url(), TlsMode::None);
     if manager.is_err() {
       return Err(ErrorKind::PostgresErr.into());
     }
     let manager = manager.unwrap();
-    let pool = Pool::new(config, manager).expect(
+    let pool = Pool::new(manager).expect(
       "Failed to turn connection into pool. This should never happen",
     );
     Ok(DatabaseClient::<PostgresConnectionManager> {
@@ -102,13 +101,12 @@ impl DatabaseClient<MysqlConnectionManager> {
   ///
   /// `settings` - The underlying settings object to configure ourselves with.
   pub fn new(settings: &Settings) -> Result<DatabaseClient<MysqlConnectionManager>> {
-    let config = Config::default();
     let manager = MysqlConnectionManager::new(settings.get_database_url().as_str());
     if manager.is_err() {
       return Err(ErrorKind::MysqlErr.into());
     }
     let manager = manager.unwrap();
-    let pool = Pool::new(config, manager).expect(
+    let pool = Pool::new(manager).expect(
       "Failed to turn a connection into pool. This should never happen",
     );
     Ok(DatabaseClient::<MysqlConnectionManager> {

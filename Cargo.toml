@@ -1,6 +1,6 @@
 [package]
 name = "cdl-runner"
-version = "0.3.0"
+version = "0.4.0"
 authors = [
   "Canvas Data Support Team <canvasdatahelp@instructure.com>",
   "Instructure Engineering <eng@instructure.com>",
@@ -13,31 +13,30 @@ postgres_compat = [ "postgres", "r2d2_postgres" ]
 mysql_compat = [ "mysql" ]
 
 [dependencies]
-base64 = "0.7"
-chrono = { version = "0.4", features = [ "serde" ] }
-config = "0.8"
-error-chain = "0.11"
-env_logger = "0.5"
-flate2 = { version = "0.2", features = ["zlib"], default-features = false }
-futures = "0.1"
-log = "0.4"
-glob = "0.2"
-hyper = "0.11"
-hyper-tls = "0.1"
-lazy_static = "0.2"
-r2d2 = "0.7"
-regex = "0.2"
-ring = "0.12"
-rocksdb = "0.8"
-native-tls = "0.1.4"
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0"
-tokio-core = "0.1"
+base64 = "^0.9"
+chrono = { version = "^0.4", features = [ "serde" ] }
+config = "^0.9"
+error-chain = "^0.12"
+env_logger = "^0.5"
+flate2 = { version = "^1.0", features = ["zlib"], default-features = false }
+futures = "^0.1"
+log = "^0.4"
+glob = "^0.2"
+lazy_static = "^1.1"
+r2d2 = "^0.8"
+rayon = "^1.0.2"
+regex = "^1.0"
+reqwest = "^0.9"
+ring = "^0.13"
+rocksdb = "^0.10"
+serde = "^1.0"
+serde_derive = "^1.0"
+serde_json = "^1.0"
+tokio-core = "^0.1"
 
 # Postgres Deps
-postgres = { version = "0.15", optional = true }
-r2d2_postgres = { version = "0.13", optional = true }
+postgres = { version = "^0.15", optional = true }
+r2d2_postgres = { version = "^0.14", optional = true }
 
 # Mysql Deps
-mysql = { version = "12", optional = true, features = ["ssl"] }
+mysql = { version = "^14", optional = true, features = ["ssl"] }

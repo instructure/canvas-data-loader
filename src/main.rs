@@ -7,15 +7,14 @@ extern crate env_logger;
 extern crate flate2;
 extern crate futures;
 extern crate glob;
-extern crate hyper;
-extern crate hyper_tls;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-extern crate native_tls;
 extern crate r2d2;
+extern crate rayon;
 extern crate regex;
+extern crate reqwest;
 extern crate ring;
 extern crate rocksdb;
 extern crate serde;
@@ -80,6 +79,15 @@ fn main() {
   let latest_schema = api_client.get_latest_schema().expect(
     "Failed to fetch latest schema!",
   );
+  let mut last_processed_schema = latest_schema.version.clone();
+  let last_processed_schema_res = whiskey.get("last_version_processed".as_bytes());
+  if let Ok(new_last_processed_schema_opt) =  last_processed_schema_res {
+    if let Some(new_last_processed_schema_bytes) = new_last_processed_schema_opt {
+      if let Some(new_last_processed_schema) = new_last_processed_schema_bytes.to_utf8() {
+        last_processed_schema = new_last_processed_schema.to_owned();
+      }
+    }
+  }
 
   let _: Vec<_> = dumps
     .into_iter()
@@ -177,7 +185,12 @@ fn main() {
             dump.dump_id.clone(),
             settings.get_save_location(),
           );
-          let res = importer.process();
+          let res = if last_processed_schema.as_str() != latest_schema.version {
+            // If not latest schema. Volatile the table to ensure tables are the latest.
+            importer.process(true)
+          } else {
+            importer.process(settings.get_all_tables_volatile())
+          };
           if res.is_ok() {
             let _ = whiskey.put(
               format!("dump_processed_{}", dump.dump_id).as_bytes(),
@@ -206,7 +219,7 @@ fn main() {
             dump.dump_id.clone(),
             settings.get_save_location(),
           );
-          let res = importer.process();
+          let res = importer.process(settings.get_all_tables_volatile());
           if res.is_ok() {
             let _ = whiskey.put(
               format!("dump_processed_{}", dump.dump_id).as_bytes(),
@@ -226,5 +239,11 @@ fn main() {
       Err(())
     })
     .collect();
+
+  let _ = whiskey.put(
+    "last_version_processed".as_bytes(),
+    latest_schema.version.as_bytes()
+  );
+
   info!("Done!");
 }

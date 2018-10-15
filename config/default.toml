@@ -6,6 +6,11 @@ skip_historical_imports = true
 # days where we do historical refreshes. It's good for a first initial import.
 # only_load_final = true
 
+# uncomment this line below to value speed of imports over, availability of data.
+# specifically the CDL will drop tables, and reimport them from scratch everytime
+# no matter the table. Instead of doing targeted DELETE/INSERTs.
+# all_tables_volatile = true
+
 [canvasdataauth]
 api_key = "FILL_ME_OUT"
 api_secret = "FILL_ME_OUT"

@@ -1,9 +1,7 @@
 //! Provides all errors for the cdl-runner crate.
 
 use glob;
-use hyper;
-use hyper::error::UriError;
-use native_tls;
+use reqwest;
 use std::io;
 
 error_chain! {
@@ -32,10 +30,9 @@ error_chain! {
 
   foreign_links {
     Globerror(glob::PatternError);
-    Hypererror(hyper::Error);
+    HttpError(reqwest::Error);
+    HttpUrlError(reqwest::UrlError);
     Ioerror(io::Error);
-    Tlserror(native_tls::Error);
-    Urierror(UriError);
   }
 
 }

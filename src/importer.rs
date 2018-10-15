@@ -5,9 +5,11 @@ use db_client::ImportDatabaseAdapter;
 use errors::*;
 use flate2::read::GzDecoder;
 use glob::glob;
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use type_converter::convert_type_for_db;
 
 lazy_static! {
@@ -57,6 +59,8 @@ pub struct Importer<T: ImportDatabaseAdapter> {
   /// The Importing Database Adapter.
   db_adapter: T,
 }
+unsafe impl<T: ImportDatabaseAdapter> Send for Importer<T> {}
+unsafe impl<T: ImportDatabaseAdapter> Sync for Importer<T> {}
 
 /// A representation of the filenaame.
 struct FileNameSplit {
@@ -182,7 +186,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
   }
 
   /// Processes a Dump. Aka Imports it.
-  pub fn process(&self) -> Result<()> {
+  pub fn process(&self, is_all_volatile: bool) -> Result<()> {
     trace!("Process Called for dump: {}", self.dump_id);
 
     // Download the Files for this dump.
@@ -196,14 +200,38 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
 
     // Keep a seperate have failed for our iterator, and the tables we've already dropped.
     // Don't want to drop a table multiple times.
-    let mut has_failed = false;
-    let mut dropped_tables: Vec<String> = Vec::new();
+    let has_failed = AtomicBool::from(false);
+
+    // Drop tables first if first.
+    collected.iter_mut().map(|entry| {
+      // If we've already failed, skip. Don't try to keep importing.
+      if has_failed.load(Ordering::Relaxed) {
+        trace!("Skipping Entry: {:?} , due to failing", entry);
+        return;
+      }
+
+      if let &mut Ok(ref mut path) = entry {
+        let path_frd = path;
+        let file_name = path_frd.file_name().unwrap().to_str().unwrap().to_owned();
+        let file_name_split = FileNameSplit::new(file_name).unwrap();
+
+        if VOLATILE_TABLES.contains(&file_name_split.table_name) || is_all_volatile {
+          let drop_res = self.db_adapter.drop_table(file_name_split.table_name);
+          if drop_res.is_err() {
+                error!("process -> is_volatile -> drop_res -> is_err");
+                error!("{:?}", drop_res.err().unwrap());
+                has_failed.store(true, Ordering::Relaxed);
+                return;
+          }
+        }
+      }
+    }).count();
 
     let _: Vec<_> = collected
-      .iter_mut()
+      .par_iter_mut()
       .map(|entry| {
         // If we've already failed, skip. Don't try to keep importing.
-        if has_failed {
+        if has_failed.load(Ordering::Relaxed) {
           trace!("Skipping Entry: {:?} , due to failing", entry);
           return;
         }
@@ -224,7 +252,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           if table_def.is_err() {
             error!("process -> table_def -> is_err");
             error!("{:?}", table_def.err().unwrap());
-            has_failed = true;
+            has_failed.store(true, Ordering::Relaxed);
             return;
           }
           let table_def = table_def.unwrap().unwrap();
@@ -238,7 +266,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           if file.is_err() {
             error!("process -> file -> is_err");
             error!("{:?}", file.err().unwrap());
-            has_failed = true;
+            has_failed.store(true, Ordering::Relaxed);
             return;
           }
           let mut file = file.unwrap();
@@ -251,58 +279,24 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           if res.is_err() {
             error!("process -> res -> is_err");
             error!("{:?}", res.err().unwrap());
-            has_failed = true;
+            has_failed.store(true, Ordering::Relaxed);
             return;
           }
           trace!("Post Reader");
 
           // Uncompress the file.
-          let decoder = GzDecoder::new(buffer.as_slice());
-          if decoder.is_err() {
-            error!("process -> decoder -> is_err");
-            error!("{:?}", decoder.err().unwrap());
-            has_failed = true;
-            return;
-          }
-          let mut decoder = decoder.unwrap();
+          let mut decoder = GzDecoder::new(buffer.as_slice());
           trace!("Post Decoder Init");
           let mut finalized_string = String::new();
           let decode_res = decoder.read_to_string(&mut finalized_string);
           if decode_res.is_err() {
             error!("prcoess -> decode_res -> is_err");
             error!("{:?}", decode_res.err().unwrap());
-            has_failed = true;
+            has_failed.store(true, Ordering::Relaxed);
             return;
           }
           trace!("Post Decode to STR");
           debug!("Decoded String: \n {:?}", finalized_string);
-
-          // Check if the table is "volatile", and may not contain always
-          // certain IDs.
-          let is_volatile = VOLATILE_TABLES.contains(&file_name_split.table_name);
-          if is_volatile {
-            debug!("{:?} is volatile", file_name_split.table_name);
-            // If we haven't dropped this table already. Go ahead, and drop it.
-            if !dropped_tables.contains(&file_name_split.table_name) {
-              trace!("Has not dropped volatile table yet");
-              let drop_res = self.db_adapter.drop_table(
-                file_name_split.table_name.clone(),
-              );
-              if drop_res.is_err() {
-                error!("process -> is_volatile -> drop_res -> is_err");
-                error!("{:?}", drop_res.err().unwrap());
-                has_failed = true;
-                return;
-              }
-              trace!("Post Create Table");
-              dropped_tables.push(file_name_split.table_name.clone());
-              trace!("Post append dropped_tables");
-              trace!("Post isVolatile");
-              trace!("Post Drop table");
-            } else {
-              trace!("Already dropped table");
-            }
-          }
 
           // Create the table if it doesn't exist.
           let create_res = self.db_adapter.create_table(
@@ -312,7 +306,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
           if create_res.is_err() {
             error!("prcoess -> is_volatile -> create_res -> is_err");
             error!("{:?}", create_res.err().unwrap());
-            has_failed = true;
+            has_failed.store(true, Ordering::Relaxed);
             return;
           }
           trace!("Post create table");
@@ -333,7 +327,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
 
             trace!("Inserting Columns: [ {:?} ]", columns);
 
-            if is_volatile {
+            if VOLATILE_TABLES.contains(&file_name_split.table_name) || is_all_volatile {
               // If we're volatile don't check if it exists already, just insert.
               trace!("Is volatile table, performing insert");
               let ins_res = self.db_adapter.insert_record(
@@ -344,7 +338,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
               if ins_res.is_err() {
                 error!("process -> for line in finalized_string -> is_volatile -> ins_res -> is_err");
                 error!("{:?}", ins_res.err().unwrap());
-                has_failed = true;
+                has_failed.store(true, Ordering::Relaxed);
                 return;
               }
             } else {
@@ -355,7 +349,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
               let id_like_column = self.get_id_like_column_from_columns(file_name_split.table_name.clone(), &columns);
               if id_like_column.is_none() {
                 error!("Failed to find table id like column!");
-                has_failed = true;
+                has_failed.store(true, Ordering::Relaxed);
                 return;
               }
               let id_like_column = id_like_column.unwrap();
@@ -375,7 +369,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
               );
               if del_res.is_err() {
                 error!("Failed to drop column!");
-                has_failed = true;
+                has_failed.store(true, Ordering::Relaxed);
                 return;
               }
 
@@ -389,7 +383,7 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
               if ins_res.is_err() {
                 error!("process -> for line in finalized_string -> !is_volatile -> ins_res -> is_err");
                 error!("{:?}", ins_res.err().unwrap());
-                has_failed = true;
+                has_failed.store(true, Ordering::Relaxed);
                 return;
               }
             }
@@ -399,9 +393,9 @@ impl<T: ImportDatabaseAdapter> Importer<T> {
       })
       .collect();
 
-    debug!("Has Failed: {}", has_failed);
+    debug!("Has Failed: {}", has_failed.load(Ordering::Relaxed));
 
-    if !has_failed {
+    if !has_failed.load(Ordering::Relaxed) {
       trace!("Hasn't Failed");
       Ok(())
     } else {
